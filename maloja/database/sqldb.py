@@ -260,6 +260,10 @@ def scrobbles_db_to_dict(rows, include_internal=False, dbconn=None) -> list[Scro
 		})
 
 		for row in rows
+		# defensive: skip a scrobble whose track was deleted (orphaned FK →
+		# track_id not in the map) instead of KeyError-crashing the page —
+		# upstream regression since 3.2.3 (pre-3.2.3 tolerated it).
+		if row.track_id in tracks
 	]
 
 
@@ -1138,7 +1142,7 @@ def count_scrobbles_by_track(since,to,resolve_ids=True,dbconn=None):
 
 	if resolve_ids:
 		tracks = get_tracks_map([row.track_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'track':tracks[row.track_id],'track_id':row.track_id} for row in result]
+		result = [{'scrobbles':row.count,'track':tracks[row.track_id],'track_id':row.track_id} for row in result if row.track_id in tracks]
 	else:
 		result = [{'scrobbles':row.count,'track_id':row.track_id} for row in result]
 	result = rank(result,key='scrobbles')
@@ -1344,7 +1348,7 @@ def count_scrobbles_by_track_of_artist(since,to,artist,associated=False,resolve_
 
 	if resolve_ids:
 		tracks = get_tracks_map([row.track_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'track':tracks[row.track_id],'track_id':row.track_id} for row in result]
+		result = [{'scrobbles':row.count,'track':tracks[row.track_id],'track_id':row.track_id} for row in result if row.track_id in tracks]
 	else:
 		result = [{'scrobbles':row.count,'track_id':row.track_id} for row in result]
 	result = rank(result,key='scrobbles')
@@ -1376,7 +1380,7 @@ def count_scrobbles_by_track_of_album(since,to,album,resolve_ids=True,dbconn=Non
 
 	if resolve_ids:
 		tracks = get_tracks_map([row.track_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'track':tracks[row.track_id],'track_id':row.track_id} for row in result]
+		result = [{'scrobbles':row.count,'track':tracks[row.track_id],'track_id':row.track_id} for row in result if row.track_id in tracks]
 	else:
 		result = [{'scrobbles':row.count,'track_id':row.track_id} for row in result]
 	result = rank(result,key='scrobbles')
