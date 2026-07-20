@@ -97,10 +97,7 @@ def import_scrobbles(inputf):
 		outputs[status](msg)
 		if status in ['CONFIDENT_IMPORT','UNCERTAIN_IMPORT']:
 
-			# prevent duplicate timestamps
-			while scrobble['scrobble_time'] in timestamps:
-				scrobble['scrobble_time'] += 1
-			timestamps.add(scrobble['scrobble_time'])
+			# same-second de-dup + shifting now handled in add_scrobbles (idempotent)
 
 			# clean up
 			(scrobble['track_artists'],scrobble['track_title']) = c.fullclean(scrobble['track_artists'],scrobble['track_title'])

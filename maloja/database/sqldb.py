@@ -276,7 +276,7 @@ def tracks_db_to_dict(rows, dbconn=None) -> list[TrackDict]:
 	albums = get_albums_map(set(row.album_id for row in rows), dbconn=dbconn)
 	return [
 		cast(TrackDict, {
-			"artists":artists[row.id],
+			"artists":artists.get(row.id, []),
 			"title":row.title,
 			"album":albums.get(row.album_id),
 			"length":row.length
@@ -389,14 +389,31 @@ def add_scrobbles(scrobbleslist: list[ScrobbleDict], update_album=False, dbconn=
 				))
 				success += 1
 			except sql.exc.IntegrityError:
-				# get existing scrobble
-				result = dbconn.execute(DB['scrobbles'].select().where(
-					DB['scrobbles'].c.timestamp == scrobble_entry['timestamp']
-				)).first()
-				if result.track_id == scrobble_entry['track_id']:
-					exists += 1
-				else:
-					errors += 1
+				# Same-second collision (timestamp is the PK): either the same scrobble
+				# (dedup) or a different track that must take the next free second.
+				# Resolving it here - track-aware, against the live DB - makes imports
+				# idempotent: on a re-import each scrobble reconverges to the slot it
+				# already holds and dedups, unlike the old blind +1s importer pre-shift
+				# which duplicated on overlapping re-imports.
+				attempts = 0
+				while True:
+					existing = dbconn.execute(DB['scrobbles'].select().where(
+						DB['scrobbles'].c.timestamp == scrobble_entry['timestamp']
+					)).first()
+					if existing is not None and existing.track_id == scrobble_entry['track_id']:
+						exists += 1
+						break
+					scrobble_entry['timestamp'] += 1
+					attempts += 1
+					if attempts > 3600:
+						errors += 1
+						break
+					try:
+						dbconn.execute(DB['scrobbles'].insert().values(**scrobble_entry))
+						success += 1
+						break
+					except sql.exc.IntegrityError:
+						continue
 
 	if errors > 0: log(f"{errors} Scrobbles have not been written to database (duplicate timestamps)!", color='red')
 	if exists > 0: log(f"{exists} Scrobbles have not been written to database (already exist)", color='orange')
@@ -1120,7 +1137,7 @@ def count_scrobbles_by_artist(since,to,associated=True,resolve_ids=True,dbconn=N
 
 	if resolve_ids:
 		artists = get_artists_map([row.artist_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'real_scrobbles':row.really_by_this_artist,'artist':artists[row.artist_id],'artist_id':row.artist_id} for row in result]
+		result = [{'scrobbles':row.count,'real_scrobbles':row.really_by_this_artist,'artist':artists[row.artist_id],'artist_id':row.artist_id} for row in result if row.artist_id in artists]
 	else:
 		result = [{'scrobbles':row.count,'real_scrobbles':row.really_by_this_artist,'artist_id':row.artist_id} for row in result]
 	result = rank(result,key='scrobbles')
@@ -1170,7 +1187,7 @@ def count_scrobbles_by_album(since,to,resolve_ids=True,dbconn=None):
 
 	if resolve_ids:
 		albums = get_albums_map([row.album_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result]
+		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result if row.album_id in albums]
 	else:
 		result = [{'scrobbles':row.count,'album_id':row.album_id} for row in result]
 	result = rank(result,key='scrobbles')
@@ -1229,7 +1246,7 @@ def count_scrobbles_by_album_combined(since,to,artist,associated=False,resolve_i
 
 	if resolve_ids:
 		albums = get_albums_map([row.album_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result]
+		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result if row.album_id in albums]
 	else:
 		result = [{'scrobbles':row.count,'album_id':row.album_id} for row in result]
 	result = rank(result,key='scrobbles')
@@ -1273,7 +1290,7 @@ def count_scrobbles_by_album_of_artist(since,to,artist,associated=False,resolve_
 
 	if resolve_ids:
 		albums = get_albums_map([row.album_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result]
+		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result if row.album_id in albums]
 	else:
 		result = [{'scrobbles':row.count,'album_id':row.album_id} for row in result]
 	result = rank(result,key='scrobbles')
@@ -1313,7 +1330,7 @@ def count_scrobbles_of_artist_by_album(since,to,artist,associated=False,resolve_
 
 	if resolve_ids:
 		albums = get_albums_map([row.album_id for row in result],dbconn=dbconn)
-		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result if row.album_id]
+		result = [{'scrobbles':row.count,'album':albums[row.album_id],'album_id':row.album_id} for row in result if row.album_id and row.album_id in albums]
 	else:
 		result = [{'scrobbles':row.count,'album_id':row.album_id} for row in result]
 	result = rank(result,key='scrobbles')
