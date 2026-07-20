@@ -27,9 +27,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/kucharczykl/maloja
+          # branch push -> :dev ; version tag vX.Y.Z -> :X.Y.Z + :latest
           tags: |
-            type=ref,event=branch
+            type=raw,value=dev,enable=${{ github.ref_type == 'branch' }}
             type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
             type=sha,format=short
       - name: Build and push
         uses: docker/build-push-action@v6
