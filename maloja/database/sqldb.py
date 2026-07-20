@@ -260,9 +260,8 @@ def scrobbles_db_to_dict(rows, include_internal=False, dbconn=None) -> list[Scro
 		})
 
 		for row in rows
-		# defensive: skip a scrobble whose track was deleted (orphaned FK →
-		# track_id not in the map) instead of KeyError-crashing the page —
-		# upstream regression since 3.2.3 (pre-3.2.3 tolerated it).
+		# defensive: skip a scrobble whose track was deleted (orphaned FK, so its
+		# id is missing from the map) so one orphan doesn't KeyError-crash the page.
 		if row.track_id in tracks
 	]
 
@@ -388,34 +387,41 @@ def add_scrobbles(scrobbleslist: list[ScrobbleDict], update_album=False, dbconn=
 					**scrobble_entry
 				))
 				success += 1
-			except sql.exc.IntegrityError:
-				# Same-second collision (timestamp is the PK): either the same scrobble
-				# (dedup) or a different track that must take the next free second.
-				# Resolving it here - track-aware, against the live DB - makes imports
-				# idempotent: on a re-import each scrobble reconverges to the slot it
-				# already holds and dedups, unlike the old blind +1s importer pre-shift
-				# which duplicated on overlapping re-imports.
+			except sql.exc.IntegrityError as e:
+				# The timestamp is the PK, so this is normally a same-second collision:
+				# the same scrobble (dedup) or a different track that must take the next
+				# free second. Resolving it here - track-aware, against the live DB -
+				# makes imports idempotent (a re-import reconverges each scrobble to the
+				# slot it already holds and dedups) and applies to live single-adds too
+				# (a distinct track on a taken second now advances instead of raising
+				# DuplicateTimestamp). If the timestamp is actually free the failure was
+				# a different constraint - surface it instead of looping.
+				placed = False
 				attempts = 0
-				while True:
+				while attempts <= 3600:
 					existing = dbconn.execute(DB['scrobbles'].select().where(
 						DB['scrobbles'].c.timestamp == scrobble_entry['timestamp']
 					)).first()
-					if existing is not None and existing.track_id == scrobble_entry['track_id']:
+					if existing is None:
+						break
+					if existing.track_id == scrobble_entry['track_id']:
 						exists += 1
+						placed = True
 						break
 					scrobble_entry['timestamp'] += 1
 					attempts += 1
-					if attempts > 3600:
-						errors += 1
-						break
 					try:
 						dbconn.execute(DB['scrobbles'].insert().values(**scrobble_entry))
 						success += 1
+						placed = True
 						break
 					except sql.exc.IntegrityError:
 						continue
+				if not placed:
+					errors += 1
+					log(f"Scrobble not written ({repr(e)}): ts={scrobble_entry.get('timestamp')} track={scrobble_entry.get('track_id')}", color='red')
 
-	if errors > 0: log(f"{errors} Scrobbles have not been written to database (duplicate timestamps)!", color='red')
+	if errors > 0: log(f"{errors} Scrobbles have not been written to database (see errors above)", color='red')
 	if exists > 0: log(f"{exists} Scrobbles have not been written to database (already exist)", color='orange')
 	return success, exists, errors
 

@@ -89,7 +89,7 @@ def import_scrobbles(inputf):
 	print(f"Parsing {col['yellow'](inputf)} as {col['cyan'](typedesc)} export.")
 	print(col['red']("Please double-check if this is correct - if the import fails, the file might have been interpreted as the wrong type."))
 
-	timestamps = set()
+	db_success = db_exists = db_errors = 0
 	scrobblebuffer = []
 
 	for status,scrobble,msg in importfunc(inputf):
@@ -124,12 +124,14 @@ def import_scrobbles(inputf):
 
 			if (result['CONFIDENT_IMPORT'] + result['UNCERTAIN_IMPORT']) % 1000 == 0:
 				print(f"Imported {result['CONFIDENT_IMPORT'] + result['UNCERTAIN_IMPORT']} scrobbles...")
-				add_scrobbles(scrobblebuffer)
+				_s, _e, _er = add_scrobbles(scrobblebuffer)
+				db_success += _s; db_exists += _e; db_errors += _er
 				scrobblebuffer = []
 
-	add_scrobbles(scrobblebuffer)
+	_s, _e, _er = add_scrobbles(scrobblebuffer)
+	db_success += _s; db_exists += _e; db_errors += _er
 
-	msg = f"Successfully imported {result['CONFIDENT_IMPORT'] + result['UNCERTAIN_IMPORT']} scrobbles"
+	msg = f"Successfully imported {db_success} scrobbles"
 	if result['UNCERTAIN_IMPORT'] > 0:
 		warningmsg = col['orange'](f"{result['UNCERTAIN_IMPORT']} Warning{'s' if result['UNCERTAIN_IMPORT'] != 1 else ''}!")
 		msg += f" ({warningmsg})"
@@ -143,6 +145,10 @@ def import_scrobbles(inputf):
 
 	if result['FAIL'] > 0:
 		print(col['red'](f"{result['FAIL']} Error{'s' if result['FAIL'] != 1 else ''}!"))
+	if db_exists > 0:
+		print(col['orange'](f"{db_exists} scrobble{'s' if db_exists != 1 else ''} already in the database (not re-imported)"))
+	if db_errors > 0:
+		print(col['red'](f"{db_errors} scrobble{'s' if db_errors != 1 else ''} could NOT be written to the database"))
 
 
 	return result
@@ -282,10 +288,8 @@ def parse_spotify(inputf):
 	#		inputfiles = [inputf]
 	#		print("Only importing", col['yellow'](pth.basename(inputf)))
 
-	# we keep timestamps here as well to remove duplicates because spotify's export
-	# is messy - this is specific to this import type and should not be mixed with
-	# the outer function timestamp check (which is there to fix duplicate timestamps
-	# that are assumed to correspond to actually distinct plays)
+	# spotify's export is messy, so this importer keeps a local timestamp de-dup.
+	# (cross-import same-second shifting is handled in add_scrobbles now.)
 	timestamps = {}
 	inaccurate_timestamps = {}
 
