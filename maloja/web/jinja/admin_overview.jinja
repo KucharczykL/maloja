@@ -15,9 +15,13 @@
 
 			return 0;
 		}
-		neo.xhttprequest("https://pypi.org/pypi/malojaserver/json",{},"GET",json=true).then((response)=>{
+		// This is a fork; upstream PyPI is frozen at 3.2.4, so check our own tags.
+		neo.xhttprequest("https://api.github.com/repos/KucharczykL/maloja/tags",{},"GET",json=true).then((response)=>{
 			result = JSON.parse(response.responseText);
-			latestvers = result.info.version.split(".");
+			// tags are "vX.Y.Z"; ordering isn't guaranteed, so reduce to the highest
+			latestvers = result
+				.map((t) => t.name.replace(/^v/,"").split("."))
+				.reduce((a,b) => versioncompare(a,b) >= 0 ? a : b, ["0","0","0"]);
 
 			neo.xhttprequest("/apis/mlj_1/serverinfo",{},"GET",json=true).then((response)=>{
 
