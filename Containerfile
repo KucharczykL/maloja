@@ -13,6 +13,9 @@ COPY --chown=abc:abc ./requirements.txt ./requirements.txt
 # copying all site-packages to runtime stage but the image is already pretty small
 RUN \
   echo "" && \
+  echo "**** upgrade base packages (CA bundle) ****" && \
+	apk upgrade --no-cache && \
+  echo "" && \
   echo "**** install build packages ****" && \
 	apk add --no-cache --virtual=build-deps \
 		gcc \
